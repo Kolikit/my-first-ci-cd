@@ -1,82 +1,15 @@
 name: CI/CD Pipeline with SAST
+
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+
 jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip 
-        pip install -r app/requirements.txt 
-        pip install pytest flake8
-
-    - name: Run flake8 Code Style Check
-      run: |
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
-      env:
-        PYTHONPATH: ${{ github.workspace }}
-
-    - name: Run Bandit SAST Scan
-      run: |
-        pip install bandit 
-        bandit -r . --severity-level high --confidence-level high -f json -o bandit_results.json || true 
-
-    - name: Upload Bandit Report as Artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: bandit-report
-        path: bandit_results.json
-        if-no-files-found: warn
-
-    - name: Check Bandit Results
-      id: bandit-check
-      run: |
-        if [ -f bandit_results.json ]; then 
-          if jq -e '.results[] | select(.issue_confidence == "HIGH" and .issue_severity == "HIGH")' bandit_results.json; then 
-            echo "Bandit found critical vulnerabilities! Failing the pipeline." 
-            exit 1
-          else 
-            echo "No critical vulnerabilities found by Bandit." 
-          fi 
-        else 
-          echo "Bandit report not found. Assuming no issues." 
-        fi
-
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: 'fs'
-        scan-ref: '.'
-        format: 'table'
-        exit-code: '1'
-        ignore-unfixed: true
-        severity: 'HIGH,CRITICAL'
-
-    - name: Run Tests with pytest
-      run: |
-        cd app
-        python -m pytest tests/ -v 
-
-  build:
-    name: Build Package
-    needs: security-scan
-    runs-on: ubuntu-latest
-    if: success()
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -86,19 +19,86 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Upgrade pip and install build dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install build
+          pip install -r requirements.txt
+          pip install pytest
+          pip install flake8
 
-      - name: Build Python package
+      - name: Run Bandit SAST Scan
         run: |
-          cd app
-          python -m build
+          pip install bandit
+          bandit -r . --severity-level high --confidence-level high -f json -o bandit_results.json || true
 
-      - name: Upload built package as artifact
+      - name: Check Bandit Results
+        id: bandit-check
+        run: |
+          if [ -f bandit_results.json ]; then
+            if jq -e '.results[] | select(.issue_confidence == "HIGH" and .issue_severity == "HIGH")' bandit_results.json; then
+              echo "Bandit found critical vulnerabilities! Failing the pipeline."
+              exit 1
+            else
+              echo "No critical vulnerabilities found by Bandit."
+            fi
+          else
+            echo "Bandit report not found. Assuming no issues."
+          fi
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'HIGH,CRITICAL'
+
+      - name: Run Tests with pytest
+        run: |
+          python -m pytest tests/ -v
+
+      - name: Upload Bandit Report
         uses: actions/upload-artifact@v4
         with:
-          name: python-package-dist
-          path: dist/
-          if-no-files-found: warn
+          name: bandit-report
+          path: bandit_results.json
+
+      - name: Run flake8 Code Style Check
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+build:
+  name: Build Package
+  needs: security-scan
+  runs-on: ubuntu-latest
+  if: success()
+
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Upgrade pip and install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build
+
+    - name: Build Python package
+      run: |
+        python -m build
+
+    - name: Upload built package as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: python-package-dist
+        path: dist/
+        if-no-files-found: warn
