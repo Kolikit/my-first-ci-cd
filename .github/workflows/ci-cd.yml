@@ -57,3 +57,9 @@ jobs:
       - name: Run Tests with pytest
         run: |
           python -m pytest tests/ -v
+
+      - name: Upload Bandit Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit_results.json
